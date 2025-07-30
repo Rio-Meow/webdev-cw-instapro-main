@@ -10,21 +10,56 @@ export function getPosts({ token }) {
     },
   })
     .then((response) => {
+      if (!response.ok) {
+        return response.text().then(text => {
+          let errorDetail = text;
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            try {
+              const errorJson = JSON.parse(text);
+              if (errorJson.error) errorDetail = errorJson.error;
+            } catch (e) { /* Не удалось распарсить как JSON */ }
+          }
+          throw new Error(`Сервер вернул ошибку ${response.status}: ${errorDetail}`);
+        });
+      }
+
       if (response.status === 401) {
         throw new Error("Нет авторизации");
+      }
+      
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+          throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
       }
       return response.json();
     })
     .then((data) => {
-      if (data.posts) { 
-        return data.posts;
+      if (data && Array.isArray(data.posts)) {
+        console.log("--- API getPosts Response ---");
+        console.log("Raw data:", JSON.stringify(data, null, 2));
+
+        return data.posts.map(post => ({
+            ...post,
+            user: post.user && typeof post.user.id !== 'undefined' ? {
+                ...post.user,
+                id: String(post.user.id) 
+            } : { id: 'unknown', name: 'Unknown User', imageUrl: '' },
+            likes: Array.isArray(post.likes) ? post.likes.map(like => ({
+                ...like,
+                user: like.user && typeof like.user.id !== 'undefined' ? {
+                    ...like.user,
+                    id: String(like.user.id) 
+                } : { id: 'unknown', name: 'Unknown User', imageUrl: '' }
+            })) : []
+        }));
       } else {
-        throw new Error("Неверный формат данных от API");
+        throw new Error("Неверный формат данных от API: отсутствуют посты или они не в формате массива.");
       }
     })
     .catch((error) => {
       console.error("Ошибка при получении постов:", error);
-      throw error; 
+      throw error;
     });
 }
 
@@ -37,19 +72,24 @@ export function uploadImage({ file }) {
     body: data,
   }).then((response) => {
     if (!response.ok) {
-      throw new Error(`Ошибка загрузки файла: ${response.statusText}`);
+      return response.text().then(text => {
+          throw new Error(`Ошибка загрузки файла: ${response.status} - ${text}`);
+      });
+    }
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
     }
     return response.json();
   });
 }
 
 export function addPost({ description, imageUrl, token }) {
-  console.log('Отправляю данные для addPost:', { description, imageUrl, token }); 
+  console.log('Отправляю данные для addPost:', { description, imageUrl, token });
 
   return fetch(postsHost, {
     method: "POST",
     headers: {
-
       Authorization: token,
     },
     body: JSON.stringify({
@@ -58,28 +98,23 @@ export function addPost({ description, imageUrl, token }) {
     }),
   })
     .then((response) => {
-      if (response.status === 400) {
+      const contentType = response.headers.get("content-type");
+      if (!response.ok) {
         return response.text().then(text => {
           let errorData = { error: "Не удалось получить детали ошибки от сервера." };
-          try {
-            errorData = JSON.parse(text); 
-          } catch (e) {
-            errorData.error = text;
+          if (contentType && contentType.includes("application/json")) {
+            try {
+              errorData = JSON.parse(text);
+            } catch (e) { /* Ошибка не JSON */ }
+          } else {
+              errorData.error = text;
           }
-          throw new Error(`Неверные данные для создания поста: ${JSON.stringify(errorData)}`);
+          throw new Error(`Сервер вернул ошибку ${response.status}: ${errorData.error || response.statusText}`);
         });
       }
-      if (response.status === 401) {
-        throw new Error("Нет авторизации");
-        return response.text().then(text => {
-          let errorData = { error: "Неизвестная ошибка сервера." };
-          try {
-            errorData = JSON.parse(text);
-          } catch (e) {
-            errorData.error = text;
-          }
-          throw new Error(`Ошибка создания поста: ${errorData.error || response.statusText}`);
-        });
+
+      if (!contentType || !contentType.includes("application/json")) {
+          throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
       }
       return response.json();
     });
@@ -88,15 +123,28 @@ export function addPost({ description, imageUrl, token }) {
 export function registerUser({ login, password, name, imageUrl }) {
   return fetch(baseHost + "/api/user", {
     method: "POST",
-    body: JSON.stringify({
+    body: JSON.stringify({ 
       login,
       password,
       name,
       imageUrl,
     }),
   }).then((response) => {
-    if (response.status === 400) {
-      throw new Error("Такой пользователь уже существует");
+    const contentType = response.headers.get("content-type");
+    if (!response.ok) {
+      return response.text().then(text => {
+          let errorMsg = "Произошла ошибка при регистрации";
+          if (contentType && contentType.includes("application/json")) {
+              try {
+                  const errorData = JSON.parse(text);
+                  if (errorData.error) errorMsg = errorData.error;
+              } catch (e) { errorMsg = text; } 
+          } else { errorMsg = text; } 
+          throw new Error(errorMsg);
+      });
+    }
+    if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
     }
     return response.json();
   });
@@ -105,13 +153,26 @@ export function registerUser({ login, password, name, imageUrl }) {
 export function loginUser({ login, password }) {
   return fetch(baseHost + "/api/user/login", {
     method: "POST",
-    body: JSON.stringify({
+    body: JSON.stringify({ 
       login,
       password,
     }),
   }).then((response) => {
-    if (response.status === 400) {
-      throw new Error("Неверный логин или пароль");
+    const contentType = response.headers.get("content-type");
+    if (!response.ok) {
+      return response.text().then(text => {
+          let errorMsg = "Неверный логин или пароль";
+          if (contentType && contentType.includes("application/json")) {
+              try {
+                  const errorData = JSON.parse(text);
+                  if (errorData.error) errorMsg = errorData.error;
+              } catch (e) { errorMsg = text; } 
+          } else { errorMsg = text; } 
+          throw new Error(errorMsg);
+      });
+    }
+    if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
     }
     return response.json();
   });
@@ -125,7 +186,13 @@ export function likePost({ postId, token }) {
     },
   }).then((response) => {
     if (!response.ok) {
-      throw new Error(`Ошибка при лайке: ${response.status}`);
+      return response.text().then(text => {
+          throw new Error(`Ошибка при лайке: ${response.status} - ${text}`);
+      });
+    }
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
     }
     return response.json();
   });
@@ -139,7 +206,13 @@ export function dislikePost({ postId, token }) {
     },
   }).then((response) => {
     if (!response.ok) {
-      throw new Error(`Ошибка при дизлайке: ${response.status}`);
+      return response.text().then(text => {
+          throw new Error(`Ошибка при дизлайке: ${response.status} - ${text}`);
+      });
+    }
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Сервер вернул некорректный ответ (не JSON): ${response.status}`);
     }
     return response.json();
   });
@@ -151,8 +224,15 @@ export function saveUserToLocalStorage(user) {
 
 export function getUserFromLocalStorage() {
   try {
-    return JSON.parse(window.localStorage.getItem("user"));
+    const userData = window.localStorage.getItem("user");
+    if (!userData) return null;
+    const parsedUser = JSON.parse(userData);
+    if (parsedUser && parsedUser.user && typeof parsedUser.user.id !== 'undefined') {
+        parsedUser.user.id = String(parsedUser.user.id);
+    }
+    return parsedUser;
   } catch (error) {
+    console.error("Ошибка при получении пользователя из localStorage:", error);
     return null;
   }
 }
