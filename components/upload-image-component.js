@@ -34,7 +34,7 @@ export function renderUploadImageComponent({ element, onImageUrlChange }) {
       if (file) {
         const labelEl = document.querySelector(".file-upload-label");
         labelEl.setAttribute("disabled", true);
-        labelEl.textContent = "Загружаю файл...";
+        labelEl.textContent = "Загружаю файл,.,";
         
         uploadImage({ file }).then(({ fileUrl }) => {
           imageUrl = fileUrl; 
