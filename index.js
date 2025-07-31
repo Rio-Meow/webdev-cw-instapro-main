@@ -15,9 +15,15 @@ import {
   getUserFromLocalStorage,
   removeUserFromLocalStorage,
   saveUserToLocalStorage,
-} from "./helpers.js";
+} from "./api.js";
 
 export let user = getUserFromLocalStorage();
+
+console.log("--- index.js initial user state ---");
+console.log("Initial user object:", user);
+console.log("Initial user ID (string):", user ? String(user.id) : 'undefined');
+console.log("------------------------------------");
+
 export let page = null;
 export let posts = [];
 
@@ -31,9 +37,10 @@ export const logout = () => {
   removeUserFromLocalStorage();
   goToPage(POSTS_PAGE);
 };
+
 export const goToPage = (newPage, data) => {
   if (
-    [
+    ![
       POSTS_PAGE,
       AUTH_PAGE,
       ADD_POSTS_PAGE,
@@ -41,45 +48,51 @@ export const goToPage = (newPage, data) => {
       LOADING_PAGE,
     ].includes(newPage)
   ) {
-    if (newPage === ADD_POSTS_PAGE) {
-      page = user ? ADD_POSTS_PAGE : AUTH_PAGE;
-      return renderApp();
-    }
+    throw new Error(`Страницы "${newPage}" не существует.`);
+  }
 
-    if (newPage === POSTS_PAGE) {
-      page = LOADING_PAGE;
-      renderApp();
+  if (newPage === ADD_POSTS_PAGE) {
+    page = user ? ADD_POSTS_PAGE : AUTH_PAGE;
+    return renderApp();
+  }
 
-      return getPosts({ token: getToken() })
-        .then((newPosts) => {
-          console.log("Загруженные посты (index.js):", newPosts); 
-          page = POSTS_PAGE;
-          posts = newPosts;
-          renderApp();
-        })
-        .catch((error) => {
-          console.error(error);
-          goToPage(POSTS_PAGE);
-        });
-    }
-
-    if (newPage === USER_POSTS_PAGE) {
-      console.log("Открываю страницу пользователя: ", data.userId);
-      page = USER_POSTS_PAGE;
-      return renderApp(data); 
-    }
-
-    page = newPage;
+  if (newPage === POSTS_PAGE) {
+    page = LOADING_PAGE;
     renderApp();
 
+    return getPosts({ token: getToken() })
+      .then((newPosts) => {
+        console.log("Загруженные посты (index.js):", newPosts);
+        page = POSTS_PAGE;
+        posts = newPosts;
+        renderApp();
+      })
+      .catch((error) => {
+        console.error("Ошибка при загрузке постов (index.js):", error);
+        page = POSTS_PAGE;
+        renderApp();
+      });
+  }
+
+  if (newPage === USER_POSTS_PAGE) {
+    console.log("Открываю страницу пользователя: ", data.userId);
+    page = USER_POSTS_PAGE;
+    return renderApp(data);
+  }
+
+  page = newPage;
+  renderApp();
+};
+
+const renderApp = (data) => {
+  const appEl = document.getElementById("app");
+  if (!appEl) {
+    console.error("Элемент '#app' не найден!");
     return;
   }
 
-  throw new Error("страницы не существует");
-};
+  console.log(`renderApp called. Current page: ${page}. User object:`, user);
 
-const renderApp = (data) => { 
-  const appEl = document.getElementById("app");
   if (page === LOADING_PAGE) {
     return renderLoadingPageComponent({
       appEl,
@@ -108,16 +121,17 @@ const renderApp = (data) => {
   if (page === POSTS_PAGE) {
     return renderPostsPageComponent({
       appEl,
-      posts, 
     });
   }
 
   if (page === USER_POSTS_PAGE) {
     return renderUserPostsPageComponent({
       appEl,
-      userId: data.userId, 
+      userId: data.userId,
     });
   }
 };
 
+console.log("--- App Initialization ---");
+console.log("index.js initial state: user object before goToPage:", user);
 goToPage(POSTS_PAGE);
